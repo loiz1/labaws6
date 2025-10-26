@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Plantilla de CloudFormation para un sitio web estático en S3 con CloudFront
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Nombre único del bucket S3 (por ejemplo, 'mi-sitio-web-unico')
+    MinLength: 3
+    MaxLength: 63
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      AccessControl: Private
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action:
+              - s3:GetObject
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref S3Bucket, "/*"]]
+
+  S3BucketPublicAccessBlock:
+    Type: AWS::S3::PublicAccessBlock
+    Properties:
+      Bucket: !Ref S3Bucket
+      BlockPublicAcls: true
+      IgnorePublicAcls: true
+      BlockPublicPolicy: true
+      RestrictPublicBuckets: true
+
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "OAI para CloudFront"
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt S3Bucket.RegionalDomainName
+            Id: s3origin
+            S3OriginConfig:
+              OriginAccessIdentity: !Join
+                - ""
+                - - "origin-access-identity/cloudfront/"
+                  - !Ref CloudFrontOAI
+
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: s3origin
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+          MinTTL: 0
+          DefaultTTL: 3600
+          MaxTTL: 86400
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+  ErrorPage: 
+    Type: AWS::S3::Object
+    DependsOn: S3Bucket
+    Properties:
+      Bucket: !Ref S3Bucket
+      Key: error.html
+      ContentType: "text/html"
+      Body: |
+        <html>
+        <head><title>Error</title></head>
+        <body>
+        <h1>Error</h1>
+        <p>Lo sentimos, ha ocurrido un error.</p>
+        </body>
+        </html>
+
+Outputs:
+  BucketNameOutput:
+    Description: El nombre del bucket S3
+    Value: !Ref S3Bucket
+  CloudFrontDomainName:
+    Description: El nombre de dominio de la distribución de CloudFront
+    Value: !GetAtt CloudFrontDistribution.DomainName
